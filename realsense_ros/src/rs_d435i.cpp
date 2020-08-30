@@ -18,9 +18,10 @@
 
 namespace realsense
 {
-RealSenseD435I::RealSenseD435I(rs2::context ctx, rs2::device dev, rclcpp::Node & node)
-: RealSenseD435(ctx, dev, node)
-{
+RealSenseD435I::RealSenseD435I(rs2::context &ctx, rs2::device &dev,
+                               rs2::pipeline &pipeline,
+                               rclcpp_lifecycle::LifecycleNode &node)
+    : RealSenseD435(ctx, dev, pipeline, node) {
   auto sn = dev_.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
   cfg_.enable_device(sn);
 
@@ -29,7 +30,6 @@ RealSenseD435I::RealSenseD435I(rs2::context ctx, rs2::device dev, rclcpp::Node &
   }
   linear_accel_cov_ = DEFAULT_LINEAR_ACCEL_COV;
   angular_velocity_cov_ = DEFAULT_ANGULAR_VELOCITY_COV;
-  initialized_ = true;
 }
 
 void RealSenseD435I::publishTopicsCallback(const rs2::frame & frame)
@@ -48,24 +48,6 @@ void RealSenseD435I::publishTopicsCallback(const rs2::frame & frame)
       publishIMUTopic(frame, t);
     }
   }
-}
-
-Result RealSenseD435I::paramChangeCallback(const std::vector<rclcpp::Parameter> & params)
-{
-  auto result = Result();
-  result.successful = true;
-  if (this->initialized_ == true) {
-    result = RealSenseD435::paramChangeCallback(params);
-    for (auto & param : params) {
-      auto param_name = param.get_name();
-      if (param_name == "accel0.enabled") {
-        result = toggleStream(ACCEL, param);
-      } else if (param_name == "gyro0.enabled") {
-        result = toggleStream(GYRO, param);
-      }
-    }
-  }
-  return result;
 }
 
 void RealSenseD435I::publishIMUTopic(const rs2::frame & frame, const rclcpp::Time & time)
@@ -137,4 +119,5 @@ IMUInfo RealSenseD435I::getIMUInfo(const rs2::frame & frame, const stream_index_
   }
   return info;
 }
+RealSenseD435I::~RealSenseD435I() { stopWorkThread(); }
 }  // namespace realsense

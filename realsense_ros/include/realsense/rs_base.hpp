@@ -15,22 +15,25 @@
 #ifndef REALSENSE__RS_BASE_HPP_
 #define REALSENSE__RS_BASE_HPP_
 
+#include <future>
 #include <map>
 #include <memory>
 #include <string>
 #include <vector>
-#include "rclcpp/rclcpp.hpp"
-#include "sensor_msgs/msg/image.hpp"
-#include "sensor_msgs/msg/camera_info.hpp"
-#include "sensor_msgs/msg/imu.hpp"
-#include "std_msgs/msg/header.hpp"
-#include "nav_msgs/msg/odometry.hpp"
-#include "tf2/LinearMath/Quaternion.h"
-#include "tf2_ros/static_transform_broadcaster.h"
+
 #include "eigen3/Eigen/Geometry"
 #include "librealsense2/rs.hpp"
-#include "realsense_msgs/msg/imu_info.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "realsense/rs_constants.hpp"
+#include "realsense_msgs/msg/imu_info.hpp"
+#include "sensor_msgs/msg/camera_info.hpp"
+#include "sensor_msgs/msg/image.hpp"
+#include "sensor_msgs/msg/imu.hpp"
+#include "std_msgs/msg/header.hpp"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2_ros/static_transform_broadcaster.h"
 
 namespace realsense
 {
@@ -61,10 +64,11 @@ public:
 class RealSenseBase
 {
 public:
-  RealSenseBase(rs2::context ctx, rs2::device dev, rclcpp::Node & node);
+  RealSenseBase(rs2::context &ctx, rs2::device &dev, rs2::pipeline &pipeline,
+                rclcpp_lifecycle::LifecycleNode &node);
   virtual ~RealSenseBase();
   virtual void publishTopicsCallback(const rs2::frame & frame) = 0;
-  virtual Result paramChangeCallback(const std::vector<rclcpp::Parameter> & params) = 0;
+  virtual void activatePublishers();
   void startPipeline();
   void setupStream(const stream_index_pair & stream);
   void publishImageTopic(const rs2::frame & frame, const rclcpp::Time & time);
@@ -86,11 +90,9 @@ public:
   void printActiveStreamProfiles();
   void printStreamProfiles(const std::vector<rs2::stream_profile> & profile_list);
   void startWorkThread();
+  void stopWorkThread();
 
 protected:
-  Result toggleStream(const stream_index_pair & stream, const rclcpp::Parameter & param);
-  Result changeResolution(const stream_index_pair & stream, const rclcpp::Parameter & param);
-  Result changeFPS(const stream_index_pair & stream, const rclcpp::Parameter & param);
   void toMsg(
     const std_msgs::msg::Header & header,
     const std::string & encoding, const cv::Mat & image, sensor_msgs::msg::Image & ros_image);
@@ -112,14 +114,16 @@ protected:
     VideoStreamInfo() {}
   } VideoStreamInfo;
 
-  rclcpp::Node & node_;
-  rs2::context ctx_;
-  rs2::device dev_;
-  rs2::pipeline pipeline_;
+  rclcpp_lifecycle::LifecycleNode & node_;
   rs2::config cfg_;
+  rs2::context & ctx_;
+  rs2::device & dev_;
+  rs2::pipeline & pipeline_;
+
   std::string base_frame_id_;
   rs2::frame_queue frame_data;
-  std::thread work_thread_;
+  bool work_active_ = true;
+  std::future<void> work_fut_;
   std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr timer_;
   std::map<stream_index_pair, bool> enable_ = {{COLOR, false}, {DEPTH, false},
@@ -131,13 +135,13 @@ protected:
   std::map<stream_index_pair, VideoStreamInfo> stream_info_;
   std::map<stream_index_pair, sensor_msgs::msg::CameraInfo> camera_info_;
 
-  std::map<stream_index_pair, rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr> image_pub_;
+  std::map<stream_index_pair, rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Image>::SharedPtr> image_pub_;
   std::map<stream_index_pair,
-    rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr> camera_info_pub_;
-  std::map<stream_index_pair, rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr> imu_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::CameraInfo>::SharedPtr> camera_info_pub_;
+  std::map<stream_index_pair, rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Imu>::SharedPtr> imu_pub_;
   std::map<stream_index_pair,
-    rclcpp::Publisher<realsense_msgs::msg::IMUInfo>::SharedPtr> imu_info_pub_;
-  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
+    rclcpp_lifecycle::LifecyclePublisher<realsense_msgs::msg::IMUInfo>::SharedPtr> imu_info_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
 };
 }  // namespace realsense
 #endif  // REALSENSE__RS_BASE_HPP_

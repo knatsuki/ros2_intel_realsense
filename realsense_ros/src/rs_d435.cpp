@@ -21,9 +21,10 @@
 
 namespace realsense
 {
-RealSenseD435::RealSenseD435(rs2::context ctx, rs2::device dev, rclcpp::Node & node)
-: RealSenseBase(ctx, dev, node)
-{
+RealSenseD435::RealSenseD435(rs2::context &ctx, rs2::device &dev,
+                             rs2::pipeline &pipeline,
+                             rclcpp_lifecycle::LifecycleNode &node)
+    : RealSenseBase(ctx, dev, pipeline, node) {
   auto sn = dev_.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
   cfg_.enable_device(sn);
 
@@ -124,67 +125,6 @@ void RealSenseD435::publishTopicsCallback(const rs2::frame & frame)
       }
     }
   }
-}
-
-Result RealSenseD435::paramChangeCallback(const std::vector<rclcpp::Parameter> & params)
-{
-  auto result = Result();
-  result.successful = true;
-  if (initialized_ == true) {
-    for (auto & param : params) {
-      auto param_name = param.get_name();
-      if (param_name == "color0.enabled") {
-        result = toggleStream(COLOR, param);
-      } else if (param_name == "color0.resolution") {
-        result = changeResolution(COLOR, param);
-      } else if (param_name == "color0.fps") {
-        result = changeFPS(COLOR, param);
-      } else if (param_name == "depth0.enabled") {
-        result = toggleStream(DEPTH, param);
-      } else if (param_name == "depth0.resolution") {
-        result = changeResolution(DEPTH, param);
-      } else if (param_name == "depth0.fps") {
-        result = changeFPS(DEPTH, param);
-      } else if (param_name == "infra1.enabled") {
-        result = toggleStream(INFRA1, param);
-      } else if (param_name == "infra1.resolution") {
-        result = changeResolution(INFRA1, param);
-      } else if (param_name == "infra1.fps") {
-        result = changeFPS(INFRA1, param);
-      } else if (param_name == "infra2.enabled") {
-        result = toggleStream(INFRA2, param);
-      } else if (param_name == "infra2.resolution") {
-        result = changeResolution(INFRA2, param);
-      } else if (param_name == "infra2.fps") {
-        result = changeFPS(INFRA2, param);
-      } else if (param_name == "align_depth") {
-        auto param_value = param.as_bool();
-        if (param_value != align_depth_) {
-          align_depth_ = param_value;
-        } else {
-          result.successful = false;
-          result.reason = "Parameter is equal to the previous value. Do nothing.";
-        }
-      } else if (param_name == "enable_pointcloud") {
-        auto param_value = param.as_bool();
-        if (param_value != enable_pointcloud_) {
-          enable_pointcloud_ = param_value;
-        } else {
-          result.successful = false;
-          result.reason = "Parameter is equal to the previous value. Do nothing.";
-        }
-      } else if (param_name == "dense_pointcloud") {
-        auto param_value = param.as_bool();
-        if (param_value != dense_pc_) {
-          dense_pc_ = param_value;
-        } else {
-          result.successful = false;
-          result.reason = "Parameter is equal to the previous value. Do nothing.";
-        }
-      }
-    }
-  }
-  return result;
 }
 
 void RealSenseD435::publishAlignedDepthTopic(const rs2::frame & frame, const rclcpp::Time & time)
@@ -434,4 +374,13 @@ void RealSenseD435::publishDensePointCloud(
     pointcloud_pub_->publish(std::move(pc_msg));
   }
 }
+
+void RealSenseD435::activatePublishers() {
+  RealSenseBase::activatePublishers();
+
+  if (aligned_depth_image_pub_ != nullptr) { aligned_depth_image_pub_->on_activate(); }
+  if (aligned_depth_info_pub_ != nullptr) { aligned_depth_info_pub_->on_activate(); }
+  if (pointcloud_pub_ != nullptr) { pointcloud_pub_->on_activate(); }
+}
+RealSenseD435::~RealSenseD435() { stopWorkThread(); }
 }  // namespace realsense

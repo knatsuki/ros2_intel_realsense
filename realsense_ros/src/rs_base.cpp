@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "realsense/rs_base.hpp"
+
 #include <boost/endian/conversion.hpp>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
-#include "realsense/rs_base.hpp"
+
+#include "rclcpp_lifecycle/lifecycle_node.hpp"
+#include "lifecycle_msgs/msg/state.hpp"
 
 namespace realsense
 {
 using namespace std::chrono_literals;
 
-RealSenseBase::RealSenseBase(rs2::context ctx, rs2::device dev, rclcpp::Node & node)
-: node_(node),
-  ctx_(ctx),
-  dev_(dev)
+RealSenseBase::RealSenseBase(rs2::context &ctx, rs2::device &dev,
+                             rs2::pipeline &pipeline,
+                             rclcpp_lifecycle::LifecycleNode &node)
+    : node_{node}, cfg_{}, ctx_{ctx}, dev_{dev}, pipeline_{pipeline}
+
 {
   // Publish static transforms
   if (node_.has_parameter("base_frame_id")) {
@@ -35,31 +40,36 @@ RealSenseBase::RealSenseBase(rs2::context ctx, rs2::device dev, rclcpp::Node & n
   } else {
     base_frame_id_ = node_.declare_parameter("base_frame_id", DEFAULT_BASE_FRAME_ID);
   }
-  pipeline_ = rs2::pipeline(ctx_);
   static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(node_);
-  node_.set_on_parameters_set_callback(
-    std::bind(
-      &RealSenseBase::paramChangeCallback, this,
-      std::placeholders::_1));
 }
 
 RealSenseBase::~RealSenseBase()
 {
   pipeline_.stop();
-  if (work_thread_.joinable()) {
-    work_thread_.join();
-  }
 }
 
 void RealSenseBase::startWorkThread()
 {
-  work_thread_ = std::thread(
-    [ = ]() {
-      while (true) {
+  work_active_ = true;
+  work_fut_ = std::async(std::launch::async, [ = ]() {
+    try {
+      while (work_active_) {
         rs2::frame frame = frame_data.wait_for_frame();
         publishTopicsCallback(frame);
       }
-    });
+    } catch (...) {
+      RCLCPP_ERROR(node_.get_logger(), "Error thrown in Realsense work thread. Shutting down node.");
+      node_.shutdown();
+    }
+
+    RCLCPP_INFO(node_.get_logger(), "Realsense work thread stopped since node is no longer active.");
+  });
+}
+
+void RealSenseBase::stopWorkThread() {
+  RCLCPP_INFO(node_.get_logger(), "Stopping Realsense work thread.");
+  work_active_ = false;
+  work_fut_.wait();
 }
 
 void RealSenseBase::startPipeline()
@@ -90,7 +100,9 @@ void RealSenseBase::startPipeline()
 
   frame_data = rs2::frame_queue(5);
   pipeline_.start(cfg_, frame_data);
+
   startWorkThread();
+
 }
 
 void RealSenseBase::setupStream(const stream_index_pair & stream)
@@ -106,12 +118,12 @@ void RealSenseBase::setupStream(const stream_index_pair & stream)
 
   if (stream == ACCEL || stream == GYRO) {
     imu_pub_.insert(
-      std::pair<stream_index_pair, rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr>(
+      std::pair<stream_index_pair, rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Imu>::SharedPtr>(
         stream,
         node_.create_publisher<sensor_msgs::msg::Imu>(SAMPLE_TOPIC.at(stream), rclcpp::QoS(1))));
     imu_info_pub_.insert(
       std::pair<stream_index_pair,
-      rclcpp::Publisher<realsense_msgs::msg::IMUInfo>::SharedPtr>(
+      rclcpp_lifecycle::LifecyclePublisher<realsense_msgs::msg::IMUInfo>::SharedPtr>(
         stream,
         node_.create_publisher<realsense_msgs::msg::IMUInfo>(
           INFO_TOPIC.at(stream),
@@ -174,12 +186,12 @@ void RealSenseBase::setupStream(const stream_index_pair & stream)
 
     stream_info_.insert(std::pair<stream_index_pair, VideoStreamInfo>(stream, info));
     image_pub_.insert(
-      std::pair<stream_index_pair, rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr>(
+      std::pair<stream_index_pair, rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Image>::SharedPtr>(
         stream,
         node_.create_publisher<sensor_msgs::msg::Image>(SAMPLE_TOPIC.at(stream), rclcpp::QoS(1))));
     camera_info_pub_.insert(
       std::pair<stream_index_pair,
-      rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr>(
+      rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::CameraInfo>::SharedPtr>(
         stream,
         node_.create_publisher<sensor_msgs::msg::CameraInfo>(
           INFO_TOPIC.at(stream),
@@ -404,115 +416,6 @@ void RealSenseBase::printStreamProfiles(const std::vector<rs2::stream_profile> &
   }
 }
 
-Result RealSenseBase::toggleStream(
-  const stream_index_pair & stream,
-  const rclcpp::Parameter & param)
-{
-  auto result = Result();
-  result.successful = true;
-  if (param.get_type() != rclcpp::ParameterType::PARAMETER_BOOL) {
-    result.successful = false;
-    result.reason = "Type should be boolean.";
-    return result;
-  }
-  if (param.as_bool() == true && enable_[stream] == false) {
-    if (stream == ACCEL || stream == GYRO || stream == POSE) {
-      cfg_.enable_stream(stream.first, stream.second);
-    } else {
-      cfg_.enable_stream(
-        stream.first, stream.second, stream_info_[stream].width, stream_info_[stream].height,
-        STREAM_FORMAT.at(stream.first), stream_info_[stream].fps);
-    }
-    pipeline_.stop();
-    rclcpp::sleep_for(200ms);
-    pipeline_.start(
-      cfg_,
-      std::bind(&RealSenseBase::publishTopicsCallback, this, std::placeholders::_1));
-    enable_[stream] = true;
-    // Publish TF
-    auto p_profile = cfg_.resolve(pipeline_);
-    auto active_profiles = p_profile.get_streams();
-    if (enable_[DEPTH] == true) {
-      auto base_profile = p_profile.get_stream(RS2_STREAM_DEPTH, 0);
-      publishStaticTransforms(base_profile, active_profiles);
-    } else if (enable_[POSE] == true) {
-      auto base_profile = p_profile.get_stream(RS2_STREAM_POSE, 0);
-      publishStaticTransforms(base_profile, active_profiles);
-    } else {
-      RCLCPP_WARN(
-        node_.get_logger(), "No TF is available. Enable base stream (Depth or Pose) first.");
-    }
-    RCLCPP_INFO(node_.get_logger(), "%s stream is enabled.", STREAM_NAME.at(stream.first).c_str());
-  } else if (param.as_bool() == false && enable_[stream] == true) {
-    cfg_.disable_stream(stream.first, stream.second);
-    enable_[stream] = false;
-    RCLCPP_INFO(node_.get_logger(), "%s stream is disabled.", STREAM_NAME.at(stream.first).c_str());
-  } else {
-    result.successful = false;
-    result.reason = "Parameter is equal to the previous value. Do nothing.";
-  }
-  return result;
-}
-
-Result RealSenseBase::changeResolution(
-  const stream_index_pair & stream,
-  const rclcpp::Parameter & param)
-{
-  auto result = Result();
-  result.successful = true;
-  if (param.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER_ARRAY) {
-    result.successful = false;
-    result.reason = "Type should be integer array.";
-    return result;
-  }
-  auto res = param.as_integer_array();
-  cfg_.enable_stream(
-    stream.first, stream.second, res[0], res[1], STREAM_FORMAT.at(
-      stream.first), stream_info_[stream].fps);
-  if (cfg_.can_resolve(pipeline_)) {
-    if (enable_[stream] == true) {
-      pipeline_.stop();
-      pipeline_.start(
-        cfg_,
-        std::bind(&RealSenseBase::publishTopicsCallback, this, std::placeholders::_1));
-    }
-    stream_info_[stream].width = static_cast<int>(res[0]);
-    stream_info_[stream].height = static_cast<int>(res[1]);
-  } else {
-    result.successful = false;
-    result.reason = "Unsupported resolution.";
-  }
-  return result;
-}
-
-Result RealSenseBase::changeFPS(const stream_index_pair & stream, const rclcpp::Parameter & param)
-{
-  auto result = Result();
-  result.successful = true;
-  if (param.get_type() != rclcpp::ParameterType::PARAMETER_INTEGER) {
-    result.successful = false;
-    result.reason = "Type should be integer.";
-    return result;
-  }
-  int fps = param.as_int();
-  cfg_.enable_stream(
-    stream.first, stream.second, stream_info_[stream].width, stream_info_[stream].height,
-    STREAM_FORMAT.at(stream.first), fps);
-  if (cfg_.can_resolve(pipeline_)) {
-    if (enable_[stream] == true) {
-      pipeline_.stop();
-      pipeline_.start(
-        cfg_,
-        std::bind(&RealSenseBase::publishTopicsCallback, this, std::placeholders::_1));
-    }
-    stream_info_[stream].fps = fps;
-  } else {
-    result.successful = false;
-    result.reason = "Unsupported configuration.";
-  }
-  return result;
-}
-
 sensor_msgs::msg::Image::SharedPtr RealSenseBase::toMsg(
   const std_msgs::msg::Header & header,
   const std::string & encoding, const cv::Mat & image)
@@ -548,6 +451,15 @@ void RealSenseBase::toMsg(
       cv_data_ptr += image.step;
     }
   }
+}
+void RealSenseBase::activatePublishers() {
+  RCLCPP_INFO(node_.get_logger(), "Activating all publishers");
+
+  for (auto& pub : camera_info_pub_ ) { pub.second->on_activate(); }
+  for (auto& pub : image_pub_ ) { pub.second->on_activate(); }
+  for (auto& pub : imu_pub_ ) { pub.second->on_activate(); }
+  for (auto& pub : imu_info_pub_ ) { pub.second->on_activate(); }
+  if (odom_pub_ != nullptr) { odom_pub_->on_activate(); }
 }
 
 }  // namespace realsense

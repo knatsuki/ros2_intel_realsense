@@ -25,15 +25,16 @@
 
 namespace realsense
 {
-RealSenseT265::RealSenseT265(rs2::context ctx, rs2::device dev, rclcpp::Node & node)
-: RealSenseBase(ctx, dev, node)
-{
+RealSenseT265::RealSenseT265(rs2::context &ctx, rs2::device &dev,
+                             rs2::pipeline &pipeline,
+                             rclcpp_lifecycle::LifecycleNode &node)
+    : RealSenseBase(ctx, dev, pipeline, node) {
+
   for (auto & stream : STREAMS) {
     setupStream(stream);
   }
   linear_accel_cov_ = DEFAULT_LINEAR_ACCEL_COV;
   angular_velocity_cov_ = DEFAULT_ANGULAR_VELOCITY_COV;
-  initialized_ = true;
 }
 
 void RealSenseT265::publishTopicsCallback(const rs2::frame & frame)
@@ -71,29 +72,6 @@ void RealSenseT265::publishTopicsCallback(const rs2::frame & frame)
       publishPoseTopic(frame, t);
     }
   }
-}
-
-Result RealSenseT265::paramChangeCallback(const std::vector<rclcpp::Parameter> & params)
-{
-  auto result = Result();
-  result.successful = true;
-  if (initialized_ == true) {
-    for (auto & param : params) {
-      auto param_name = param.get_name();
-      if (param_name == "fisheye1.enabled") {
-        result = toggleStream(FISHEYE1, param);
-      } else if (param_name == "fisheye2.enabled") {
-        result = toggleStream(FISHEYE2, param);
-      } else if (param_name == "accel0.enabled") {
-        result = toggleStream(ACCEL, param);
-      } else if (param_name == "gyro0.enabled") {
-        result = toggleStream(GYRO, param);
-      } else if (param_name == "pose0.enabled") {
-        result = toggleStream(POSE, param);
-      }
-    }
-  }
-  return result;
 }
 
 void RealSenseT265::publishIMUTopic(const rs2::frame & frame, const rclcpp::Time & time)
@@ -239,5 +217,8 @@ void RealSenseT265::publishPoseTopic(const rs2::frame & frame, const rclcpp::Tim
     0, 0, 0, 0, cov_twist, 0,
     0, 0, 0, 0, 0, cov_twist};
   odom_pub_->publish(odom_msg);
+}
+RealSenseT265::~RealSenseT265() {
+  stopWorkThread();
 }
 }  // namespace realsense

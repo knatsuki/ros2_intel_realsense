@@ -19,7 +19,7 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   auto realsense_node = std::make_shared<realsense::RealSenseNodeFactory>();
-  rclcpp::spin(realsense_node);
+  rclcpp::spin(realsense_node->get_node_base_interface());
   rclcpp::shutdown();
   return 0;
 }

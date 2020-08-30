@@ -18,6 +18,7 @@
 #include <sensor_msgs/image_encodings.hpp>
 #include <opencv2/imgproc/types_c.h>
 
+#include <exception>
 #include <map>
 #include <string>
 #include <utility>
@@ -25,6 +26,11 @@
 
 namespace realsense
 {
+
+class UnsupportedDeviceError: public std::exception{};
+
+constexpr auto NODE_NAME = "realsense_node";
+
 const uint16_t RS415_PID = 0x0ad3;          // ASRC
 const uint16_t RS435_RGB_PID = 0x0b07;      // AWGC
 const uint16_t RS435i_RGB_PID = 0x0B3A;     // AWGC_MM

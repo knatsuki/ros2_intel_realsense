@@ -16,6 +16,7 @@
 #define REALSENSE__RS_D435_HPP_
 
 #include <vector>
+
 #include "sensor_msgs/msg/camera_info.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -30,10 +31,12 @@ namespace realsense
 class RealSenseD435 : public RealSenseBase
 {
 public:
-  RealSenseD435(rs2::context ctx, rs2::device dev, rclcpp::Node & node);
-  virtual ~RealSenseD435() = default;
+  RealSenseD435(rs2::context &ctx, rs2::device &dev, rs2::pipeline &pipeline,
+                rclcpp_lifecycle::LifecycleNode &node);
+  ~RealSenseD435() override;
+  void activatePublishers() override;
   void publishTopicsCallback(const rs2::frame & frame) override;
-  Result paramChangeCallback(const std::vector<rclcpp::Parameter> & params) override;
+
   void publishAlignedDepthTopic(const rs2::frame & frame, const rclcpp::Time & time);
   void publishSparsePointCloud(
     const rs2::points & points, const rs2::video_frame & color_frame,
@@ -41,7 +44,6 @@ public:
   void publishDensePointCloud(
     const rs2::points & points, const rs2::video_frame & color_frame,
     const rclcpp::Time & time);
-  void updateStreamCalibData(const rs2::video_stream_profile & video_profile);
 
 protected:
   bool align_depth_;
@@ -52,9 +54,9 @@ protected:
   rs2::pointcloud pc_;
   rs2::points points_;
 
-  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr aligned_depth_image_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr aligned_depth_info_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::Image>::SharedPtr aligned_depth_image_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::CameraInfo>::SharedPtr aligned_depth_info_pub_;
+  rclcpp_lifecycle::LifecyclePublisher<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_pub_;
 
 private:
   const std::vector<stream_index_pair> IMAGE_STREAMS = {COLOR, DEPTH, INFRA1, INFRA2};

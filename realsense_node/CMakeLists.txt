@@ -66,6 +66,7 @@ set(CMAKE_CXX_FLAGS "-fPIE -fPIC -D_FORTIFY_SOURCE=2 -fstack-protector -Wformat 
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -88,6 +89,7 @@ add_executable(realsense_node
 
 ament_target_dependencies(realsense_node
   rclcpp
+  rclcpp_lifecycle
   nav_msgs
   sensor_msgs
   tf2

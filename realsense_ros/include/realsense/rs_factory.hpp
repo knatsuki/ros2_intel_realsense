@@ -17,32 +17,43 @@
 
 #include <memory>
 #include <string>
-#include "rclcpp/rclcpp.hpp"
+#include "rclcpp_lifecycle/lifecycle_node.hpp"
 #include "librealsense2/rs.hpp"
 #include "realsense/rs_constants.hpp"
 #include "realsense/rs_base.hpp"
 
 namespace realsense
 {
-class RealSenseNodeFactory : public rclcpp::Node
+class RealSenseNodeFactory : public rclcpp_lifecycle::LifecycleNode
 {
 public:
   explicit RealSenseNodeFactory(const rclcpp::NodeOptions & node_options = rclcpp::NodeOptions());
-  RealSenseNodeFactory(
-    const std::string & node_name, const std::string & ns,
-    const rclcpp::NodeOptions & node_options = rclcpp::NodeOptions());
-  virtual ~RealSenseNodeFactory();
+  ~RealSenseNodeFactory() override = default;
+
+  CallbackReturn
+  on_configure(const rclcpp_lifecycle::State &previous_state) override;
+  CallbackReturn
+  on_cleanup(const rclcpp_lifecycle::State &previous_state) override;
+  CallbackReturn
+  on_shutdown(const rclcpp_lifecycle::State &previous_state) override;
+  CallbackReturn
+  on_activate(const rclcpp_lifecycle::State &previous_state) override;
+  CallbackReturn
+  on_deactivate(const rclcpp_lifecycle::State &previous_state) override;
+  CallbackReturn
+  on_error(const rclcpp_lifecycle::State &previous_state) override;
 
 private:
-  void init();
-  void startDevice();
+  void initializeNode();
   void changeDeviceCallback(rs2::event_information & info);
   void getDevice(rs2::device_list & list);
+  void resetState();
+
   std::unique_ptr<RealSenseBase> rs_node_;
   rs2::context ctx_;
   rs2::device dev_;
+  rs2::pipeline pipeline_;
   std::string serial_no_;
-  std::thread query_thread_;
 };
 }  // namespace realsense
 
