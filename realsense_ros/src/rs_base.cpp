@@ -57,8 +57,15 @@ void RealSenseBase::startWorkThread()
         rs2::frame frame = frame_data.wait_for_frame();
         publishTopicsCallback(frame);
       }
+    } catch (const std::exception &ex) {
+      RCLCPP_ERROR_STREAM(node_.get_logger(),
+                          "Error thrown in Realsense work thread:\n"
+                              << ex.what() << "\nShutting down node.");
+      node_.shutdown();
     } catch (...) {
-      RCLCPP_ERROR(node_.get_logger(), "Error thrown in Realsense work thread. Shutting down node.");
+      RCLCPP_ERROR(
+          node_.get_logger(),
+          "Error thrown in Realsense work thread. Shutting down node.");
       node_.shutdown();
     }
 
